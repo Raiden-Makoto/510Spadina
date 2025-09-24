@@ -58,28 +58,128 @@ class FAISSMatcher:
         index.add(self.embeddings)
         return index
 
+    def find_character_by_name(self, name):
+        """Find character file by name (case-insensitive partial match)"""
+        name_lower = name.lower()
+        
+        # First try exact filename match
+        for image_file in self.image_files:
+            filename = os.path.basename(image_file)
+            name_without_ext = os.path.splitext(filename)[0].lower()
+            if name_lower == name_without_ext:
+                return image_file
+        
+        # Then try partial matches
+        matches = []
+        for image_file in self.image_files:
+            filename = os.path.basename(image_file)
+            name_without_ext = os.path.splitext(filename)[0].lower()
+            if name_lower in name_without_ext or name_without_ext in name_lower:
+                matches.append(image_file)
+        
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            print(f"Multiple matches found for '{name}':")
+            for i, match in enumerate(matches, 1):
+                print(f"  {i}. {os.path.basename(match)}")
+            while True:
+                try:
+                    choice = int(input("Select which one (1-{}): ".format(len(matches))))
+                    if 1 <= choice <= len(matches):
+                        return matches[choice - 1]
+                except ValueError:
+                    pass
+                print("Invalid selection. Please try again.")
+        
+        return None
+
+    def display_character_for_confirmation(self, image_path, character_name):
+        """Display a single character image for confirmation"""
+        plt.ion()
+        plt.figure(figsize=(6, 6))
+        img = Image.open(image_path).convert("RGB")
+        plt.imshow(img)
+        plt.axis('off')
+        plt.title(f"Character: {character_name}\n{os.path.basename(image_path)}", fontsize=12)
+        plt.tight_layout()
+        try:
+            plt.show(block=False)
+            plt.pause(0.1)
+        except TypeError:
+            plt.pause(0.1)
+
     def query(self, query, top_k=3):
-        text = clip.tokenize([query]).to(self.device)
+        # Split query into individual attributes
+        attributes = [attr.strip() for attr in query.split(',') if attr.strip()]
+        
+        if not attributes:
+            print("No valid attributes provided.")
+            return None
+            
+        print(f"Searching for attributes: {', '.join(attributes)}")
+        
+        # Start with all characters
+        current_candidates = list(range(len(self.image_files)))
+        
+        # Recursively filter by each attribute
+        for i, attribute in enumerate(attributes):
+            print(f"Filtering by '{attribute}'...")
+            
+            # Get embeddings for current candidates
+            if not current_candidates:
+                print("No candidates remaining.")
+                return None
+                
+            candidate_embeddings = self.embeddings[current_candidates]
+            
+            # Search for this attribute
+            text = clip.tokenize([attribute]).to(self.device)
+            with torch.no_grad():
+                text_embedding = self.model.encode_text(text)
+                text_embedding /= text_embedding.norm(dim=-1, keepdim=True)
+                text_embedding = text_embedding.cpu().numpy()
+            
+            # Create temporary index for current candidates
+            temp_index = faiss.IndexFlatIP(candidate_embeddings.shape[1])
+            temp_index.add(candidate_embeddings)
+            
+            # Find best matches for this attribute within current candidates
+            D, I = temp_index.search(text_embedding, k=min(len(current_candidates), max(5, len(current_candidates)//2)))
+            
+            # Map back to original indices
+            matching_indices = [current_candidates[idx] for idx in I[0]]
+            
+            current_candidates = matching_indices
+            print(f"  Remaining candidates: {len(current_candidates)}")
+        
+        if not current_candidates:
+            print("No characters match all attributes.")
+            return None
+        
+        # Final ranking of remaining candidates
+        print("Final ranking...")
+        final_embeddings = self.embeddings[current_candidates]
+        
+        # Combine all attributes for final ranking
+        combined_query = ", ".join(attributes)
+        text = clip.tokenize([combined_query]).to(self.device)
         with torch.no_grad():
             text_embedding = self.model.encode_text(text)
             text_embedding /= text_embedding.norm(dim=-1, keepdim=True)
             text_embedding = text_embedding.cpu().numpy()
-        # Initial FAISS search (inner product ~= cosine on normalized vectors)
-        initial_k = max(10, top_k)  # get more then rerank
-        D, I = self.index.search(text_embedding, k=min(initial_k, len(self.image_files)))
-
-        # Rerank with higher-precision cosine in torch
+        
+        # Calculate final scores
         with torch.no_grad():
-            candidate_indices = I[0].tolist()
-            candidate_vecs = torch.from_numpy(self.embeddings[candidate_indices]).to(self.device)
-            text_vec = torch.from_numpy(text_embedding).to(self.device)  # shape (1, d)
-            # Ensure matching dtypes for matmul (e.g., float32 vs float16)
+            candidate_vecs = torch.from_numpy(final_embeddings).to(self.device)
+            text_vec = torch.from_numpy(text_embedding).to(self.device)
             text_vec = text_vec.to(candidate_vecs.dtype)
-            sims = torch.matmul(candidate_vecs, text_vec.T).squeeze(1)  # cosine since normalized
+            sims = torch.matmul(candidate_vecs, text_vec.T).squeeze(1)
             sorted_indices = torch.argsort(sims, descending=True).tolist()
-
-        reranked = [(self.image_files[candidate_indices[j]], float(sims[j].item())) for j in sorted_indices[:top_k]]
-        top_matches = reranked
+        
+        # Map back to original indices and create final results
+        final_candidates = [current_candidates[i] for i in sorted_indices]
+        top_matches = [(self.image_files[idx], float(sims[i].item())) for i, idx in enumerate(final_candidates[:top_k])]
         # Display choices
         print("Top matches:")
         for idx, (path, score) in enumerate(top_matches, start=1):
@@ -105,23 +205,57 @@ class FAISSMatcher:
         # Ask user to choose
         choice = None
         while choice is None:
-            raw = input(f"Select 1-{len(top_matches)}: ").strip()
+            raw = input(f"Select 1-{len(top_matches)} (or 0 to choose your own): ").strip()
             if raw.isdigit():
                 num = int(raw)
-                if 1 <= num <= len(top_matches):
+                if 0 <= num <= len(top_matches):
                     choice = num
                     break
             print("Invalid selection. Please try again.")
-        selected_path = top_matches[choice - 1][0]
-        # Close preview window after selection
-        try:
-            plt.close('all')
-        except Exception:
-            pass
-        print(f"Selected: {selected_path}")
-        return selected_path
+        
+        if choice == 0:
+            # Close the triple preview window first
+            try:
+                plt.close('all')
+            except Exception:
+                pass
+            
+            # User wants to choose their own character
+            character_name = input("Enter the character name: ").strip()
+            selected_path = self.find_character_by_name(character_name)
+            if selected_path:
+                # Display the character image for confirmation
+                self.display_character_for_confirmation(selected_path, character_name)
+                confirm = input("Is this the character you want? (y/n): ").strip().lower()
+                if confirm in ['y', 'yes']:
+                    print(f"Selected: {selected_path}")
+                    return selected_path
+                else:
+                    print("Let's try again.")
+                    return self.query(query, top_k)  # Recursive call to try again
+            else:
+                print(f"Character '{character_name}' not found. Please try again.")
+                return self.query(query, top_k)  # Recursive call to try again
+        else:
+            selected_path = top_matches[choice - 1][0]
+            # Close preview window after selection
+            try:
+                plt.close('all')
+            except Exception:
+                pass
+            print(f"Selected: {selected_path}")
+            return selected_path
 
 if __name__ == "__main__":
+    import sys
+    
     matcher = FAISSMatcher(device="mps")
-    query = input("Enter the desired qualities of your character. For example, cat ears, green eyes, etc. ").strip()
+    
+    # Check if query was provided as command line argument
+    if len(sys.argv) > 1:
+        query = " ".join(sys.argv[1:])
+        print(f"Using query: {query}")
+    else:
+        query = input("Enter the desired qualities of your character, separated by commas. For example: cat ears, green eyes, sword ").strip()
+    
     matcher.query(query, top_k=3)
