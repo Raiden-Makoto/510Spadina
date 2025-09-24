@@ -36,7 +36,7 @@ fi
 echo "Starting Genshin Character Matcher..."
 echo "Query: $QUERY"
 echo "Note: You'll need to select 1-3 when the images appear."
-python queensquay.py "$QUERY"
+python faiss.py "$QUERY"
 
 # Deactivate virtual environment when done
 deactivate
