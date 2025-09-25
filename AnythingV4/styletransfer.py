@@ -3,6 +3,7 @@ import torch
 from PIL import Image
 import os
 import sys
+import gc
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 model_id = "xyn-ai/anything-v4.0"
@@ -39,6 +40,11 @@ def generate_image(file_path):
     fname = f"Avatar_like_{selected_character}.png"
     result.save(fname)
     print(f"Image saved as {fname}")
+    
+    # Clear memory
+    del result
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    gc.collect()
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
