@@ -3,6 +3,9 @@
 This project contains AI-powered style transfer tools for generating an anime-style avatar of your face from Genshin Impact character references (see [Quick Start](#-quick-start)).   
 You can also just use AnythingV4 to generate avatars based off any Genshin Impact character you want (see [Detailed Usage](#-detailed-usage))
 
+## Gradio Demo
+Available [here](https://42cummer-genshinfyv2.hf.space/).
+
 ## 🎯 Project Structure
 
 ```
