@@ -4,6 +4,7 @@ from PIL import Image
 import os
 import sys
 import gc
+import argparse
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 model_id = "xyn-ai/anything-v4.0"
@@ -20,10 +21,8 @@ vae = AutoencoderKL.from_pretrained(
 pipe.vae = vae
 pipe.enable_attention_slicing("max")  # uses the smallest possible slices (lowest VRAM, slowest)
 
-def generate_image(file_path):
-    optional_tags = input("Enter optional tags, separated by commas, or press enter to skip.\nFor example, 'blonde, green eyes' ").strip()
+def generate_image(file_path, optional_tags=None):
     selected_character = os.path.splitext(os.path.basename(file_path))[0].lower()
-    
     # Handle empty optional tags
     if optional_tags:
         prompt = f"{selected_character}_(genshin impact), 1girl,{optional_tags}, portrait"
@@ -47,10 +46,11 @@ def generate_image(file_path):
     gc.collect()
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python styletransfer.py <image_path>")
-        print("Example: python styletransfer.py ../GenshinCharacters/Fischl.png")
-        sys.exit(1)
-    
-    file_path = sys.argv[1]
-    generate_image(file_path)
+    parser = argparse.ArgumentParser(description="Generate an avatar-like image using Anything V4 style transfer.")
+    parser.add_argument("image_path", help="Path to the character image (e.g., ../GenshinCharacters/Fischl.png)")
+    parser.add_argument("-t", "--optional-tags", dest="optional_tags", default=None,
+                        help="Optional tags separated by commas (e.g., 'blonde, green eyes')")
+    args = parser.parse_args()
+
+    file_path = args.image_path
+    generate_image(file_path, args.optional_tags)

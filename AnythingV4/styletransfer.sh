@@ -1,19 +1,37 @@
 #!/bin/bash
 
 # Style Transfer Runner Script
-# Usage: ./run_style_transfer.sh <image_path>
-# Example: ./run_style_transfer.sh ../GenshinCharacters/Fischl.png
+# Usage: ./styletransfer.sh <image_path> [-t "optional, tags"]
+# Example: ./styletransfer.sh ../GenshinCharacters/Fischl.png -t "blonde, green eyes"
 
-# Check if argument is provided
-if [ $# -eq 0 ]; then
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Parse arguments
+if [ $# -lt 1 ]; then
     echo "Error: No image path provided"
-    echo "Usage: ./run_style_transfer.sh <image_path>"
-    echo "Example: ./run_style_transfer.sh ../GenshinCharacters/Fischl.png"
+    echo "Usage: ./styletransfer.sh <image_path> [-t \"optional, tags\"]"
+    echo "Example: ./styletransfer.sh ../GenshinCharacters/Fischl.png -t \"blonde, green eyes\""
     exit 1
 fi
 
-# Get the image path from argument
-IMAGE_PATH="$1"
+IMAGE_PATH="${1}"
+shift
+
+OPTIONAL_TAGS=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--optional-tags)
+            shift
+            OPTIONAL_TAGS="$1"
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Usage: ./styletransfer.sh <image_path> [-t \"optional, tags\"]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # Check if the file exists
 if [ ! -f "$IMAGE_PATH" ]; then
@@ -27,20 +45,32 @@ if ! file "$IMAGE_PATH" | grep -q "image"; then
     exit 1
 fi
 
-echo "Please ensure you are running on a machine with an NVIDIA GPU for CUDA support or Apple Silicon GPU for MPS support"
-echo "It is not recommended to run this script on only CPU"
-echo "Please ensure you have activated the virtual environment"
-echo "Run 'source .venv/bin/activate' to activate the virtual environment"
-echo "Please ensure you have installed the required dependencies"
-echo "Run 'pip install -r requirements.txt' to install the dependencies"
-echo "Please ensure that you have at least 8GB of VRAM available"
+echo "Ensure NVIDIA (CUDA) or Apple Silicon (MPS) GPU is available."
+echo "It is not recommended to run this script on only CPU."
+echo "If using a venv, run 'source .venv/bin/activate' first or let this script auto-detect it."
+echo "Install dependencies with 'pip install -r requirements.txt' if not already installed."
+echo "Ensure at least 8GB of VRAM is available."
 echo "----------------------------------------------------------"
 echo "Starting style transfer for: $IMAGE_PATH"
 echo "This may take a few minutes..."
 echo ""
 
-# Run the Python script
-python3 styletransfer.py "$IMAGE_PATH"
+# Choose Python (prefer local venv if present)
+PYTHON_BIN="python3"
+if [ -x "${SCRIPT_DIR}/../.venv/bin/python" ]; then
+    PYTHON_BIN="${SCRIPT_DIR}/../.venv/bin/python"
+elif [ -x "${SCRIPT_DIR}/.venv/bin/python" ]; then
+    PYTHON_BIN="${SCRIPT_DIR}/.venv/bin/python"
+fi
+
+# Run the Python script from its directory so relative assets resolve
+cd "${SCRIPT_DIR}" || exit 1
+
+if [ -n "$OPTIONAL_TAGS" ]; then
+    "$PYTHON_BIN" styletransfer.py "$IMAGE_PATH" -t "$OPTIONAL_TAGS"
+else
+    "$PYTHON_BIN" styletransfer.py "$IMAGE_PATH"
+fi
 
 # Check if the script ran successfully
 if [ $? -eq 0 ]; then

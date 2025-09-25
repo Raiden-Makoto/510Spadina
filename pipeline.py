@@ -13,11 +13,15 @@ import clip
 import glob
 import sys
 import argparse
+from diffusers import AutoencoderKL, StableDiffusionPipeline
+import gc
 
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Human to Anime Feature Matcher using DINO and CLIP')
     parser.add_argument('test_image', help='Path to the test image file')
+    parser.add_argument('-t', '--optional-tags', dest='optional_tags', default=None,
+                        help="Optional tags separated by commas (e.g., 'blonde, green eyes')")
     args = parser.parse_args()
     
     # Check if test image file exists
@@ -26,7 +30,7 @@ def main():
         sys.exit(1)
     
     # Setup device
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
     
     # Load models
     model = timm.create_model("vit_base_patch14_dinov2.lvd142m", pretrained=True)
@@ -54,7 +58,7 @@ def main():
             return clip_model.encode_image(img_pre).cpu().numpy().flatten()
     
     # Get all PNG and JPG files from GenshinCharacters directory
-    avatar_files = glob.glob("../GenshinCharacters/*.png") + glob.glob("../GenshinCharacters/*.jpg")
+    avatar_files = glob.glob("./GenshinCharacters/*.png") + glob.glob("./GenshinCharacters/*.jpg")
     dino_embeddings = [get_dino_embedding(img) for img in avatar_files]
     clip_embeddings = [get_clip_embedding(img) for img in avatar_files]
     
@@ -79,8 +83,50 @@ def main():
     
     # Find best match
     best_idx = int(np.argmax(similarities))
-    #print("Best match:", avatar_files[best_idx], "\nScore:", similarities[best_idx])
+    # Print exact path only for downstream parsing compatibility
     print(avatar_files[best_idx])
+    styletransfer_input = avatar_files[best_idx]
+
+    sd_device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+    model_id = "xyn-ai/anything-v4.0"
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float32,
+        safety_checker=None
+    ).to(sd_device)
+    #pipe.enable_xformers_memory_efficient_attention()
+    vae = AutoencoderKL.from_pretrained(
+        "stabilityai/sd-vae-ft-mse",
+        torch_dtype=torch.float32
+    ).to(sd_device)
+    pipe.vae = vae
+    pipe.enable_attention_slicing("max")  # uses the smallest possible slices (lowest VRAM, slowest)
+
+    def generate_image(file_path, optional_tags=None):
+        selected_character = os.path.splitext(os.path.basename(file_path))[0].lower()
+        # Handle empty optional tags
+        if optional_tags:
+            prompt = f"{selected_character}_(genshin impact), 1girl,{optional_tags}, portrait"
+        else:
+            prompt = f"{selected_character}_(genshin impact), 1girl, portrait"
+        negative_prompt = "realistic, photorealistic, low quality, blur"
+        result = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            guidance_scale=7.5,
+            num_inference_steps=30,
+            num_images_per_prompt=1,
+        ).images[0]
+        fname = f"Avatar_like_{selected_character}.png"
+        result.save(fname)
+        print(f"Image saved as {fname}")
+        
+        # Clear memory
+        del result
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
+    
+    generate_image(styletransfer_input, args.optional_tags)
 
 if __name__ == "__main__":
     main()
