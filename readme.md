@@ -39,28 +39,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Find the Character that Represents you
+### 2. Run the Pipeline!!
 ```bash
 # Navigate to DINOv2 directory
 cd DINOv2
 
 # Run image-image matching
-./dino.sh <path_to_your_image>
-./dino.sh ../test_image.png
+./pipeline.sh <path_to_your_image> -t <optional_tags>
+./pipeline.sh test_image.png -t "brown hair, red eyes"
 ```
 
-
-### 3. Generate Avatar-Style Images
-
-```bash
-# Navigate to AnythingV4 directory
-cd AnythingV4
-
-# Run style transfer for the Genshin character that is returned in Step 2
-./styletransfer.sh ../GenshinCharacters/Fischl.png
-./styletransfer.sh ../GenshinCharacters/Sayu.png
-./styletransfer.sh ../GenshinCharacters/Keqing.png
-```
 
 ## 📖 Detailed Usage
 
